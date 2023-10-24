@@ -1,27 +1,34 @@
 import subprocess
-from ruffus import transform
+from ruffus import transform, suffix
 from fasta_generate_regions import generate_regions
 
-@transform(input_fastas,
-           suffix(".fasta"),
-           ".paf")
-def map_reads(input_fastas, output_paf, sample_id, threads):
+# get these from a YAML config file?
+starting_files = [("example_data/brenthis_ino_chr14.reference.fasta",
+                  "example_data/SO_BI_375.subsamp.1.fastq.gz",
+                   "example_data/SO_BI_375.subsamp.2.fastq.gz")]
+
+@transform(input=starting_files,
+           filter=suffix(".reference.fasta"),
+           output=".paf"
+           )
+def map_reads(infiles, outfile, threads=1):
     """Map reads to reference with minimap2
 
     Args:
-        fastas (list): List [reference_fasta, read_fastas] of files
-        output (path): Output path
-        sample_id (str): Sample ID, e.g. "ES_BI_375"
-        threads (int): Number of threads to use
+        infiles (list): List of input files [(reference, reads1, reads2), ...]
+        outfile (path): PAF file path
+        threads (int, optional): Number of threads to run minimap with. Defaults to 1.
     """
 
-    minimap_cmd = ["minimap2", "-ax", "sr", 
-                   "-t" f"{threads}" 
-                   "-R" f"'@RG\tID:{sample_id}\tSM:{sample_id}'"]
-    minimap_cmd.extend(input_fastas)
-    minimap_cmd.append(f"> {output_paf}")
+    sample_id = Path(infiles[1]).stem.split(".")[0]
+    assert sample_id == Path(infiles[2]).stem.split(".")[0]
 
-    subprocess.run(minimap_cmd, shell=True, check=True)
+    minimap_cmd = ["minimap2",
+                   "-ax", "sr", "-t", "1", 
+                   "-R", f'@RG\\tID:{sample_id}\\tSM:{sample_id}']
+    minimap_cmd.extend(list(infiles))
+
+    subprocess.run(minimap_cmd, stdout=open(outfile, "w"), shell=False, check=True)
 
 
 @split(fasta_index_file, ".bed")
