@@ -1,5 +1,6 @@
 import subprocess
 from ruffus import transform
+from fasta_generate_regions import generate_regions
 
 @transform(input_fastas,
            suffix(".fasta"),
@@ -21,6 +22,13 @@ def map_reads(input_fastas, output_paf, sample_id, threads):
     minimap_cmd.append(f"> {output_paf}")
 
     subprocess.run(minimap_cmd, shell=True, check=True)
+
+
+@split(fasta_index_file, ".bed")
+def generate_fasta_regions(fasta_index_file, region_beds, size, bed_dir):
+    generate_regions(fasta_index_file=fasta_index_file,
+                     size=size,
+                     bed_dir=bed_dir)
 
 
 @transform(map_reads,
@@ -77,34 +85,16 @@ def mark_duplicates(input_bam, output_bam, threads, temp_dir, overflow_list_size
         check=True
     )
 
-@transform(mark_duplicates,
-           suffix(".MD.bam"),
-           ".vcf")
-def call_variants(input_files, output_vcf, region_size=100_000_000):
-    ## TODO: make call_variants_per_region function and use this to paralellise
-    """Call variants with Freebayes
 
-    Args:
-        input_files (list): List of input files [input_fasta, input_bams_list], where input_bams_list is a text file of BAMs
-        output_vcf (path): Path to write VCF to
-        region_size (int, optional): _description_. Defaults to 100_000_000.
-    """
+@split(mark_duplicates, "*.vcf", region_bed)
+def call_variants_per_chromosome(input_bams_list, output_region_vcf, input_fasta, region):
 
-    input_fasta = input_files[0]
-    input_bams_list = input_files[1]
-
-    generate_regions = subprocess.run([
-        "fasta_generate_regions.py", 
-        "--fai", input_fasta,
-        "--region_size", f"{region_size}"],
-        stdout=subprocess.PIPE,
-        shell=True,
-        check=True)
+    # How to parallelise this? For loop with joblib?
     
-    # Need to parallelise this - better to do this directly rather than using freebayes-parallel which isn't very robust
     variant_calling = subprocess.run([
         "freebayes", 
         "--fasta-reference", input_fasta,
+        "--region", region,
         "--limit-coverage", "250", 
         "--use-best-n-alleles", "8", 
         "--no-population-priors", 
@@ -117,3 +107,11 @@ def call_variants(input_files, output_vcf, region_size=100_000_000):
         check=True,
         stdin=
         stdout=open(output_vcf, "w"))
+
+
+@merge(call_variants_per_chromosome, "*.vcf", "calls.vcf")
+def merge_chromosome_vcfs(input_vcfs, output_vcf):
+    subprocess.run(["bcftools", "concat", "--allow-overlaps", "--remove-duplicates"].append(input_vcfs),
+                   stdout=output_vcf,
+                   check=True,
+                   shell=True)
