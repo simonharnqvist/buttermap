@@ -10,6 +10,7 @@ import argparse
 import sys
 from buttermap.fasta_generate_regions import generate_regions
 from buttermap.utils import read_bed
+from buttermap.freebayes_region import run_freebayes_on_region
 
 #############
 ### SETUP ###
@@ -29,7 +30,9 @@ parser.add_argument("--threads",
                     help="Number of CPU threads to use",
                     default=1)
 parser.add_argument("--region-size",
-                    help="Region size for parallelising variant calling", default=100_000, required=False)
+                    help="Region size for parallelising variant calling", type=int, default=100_000, required=False)
+parser.add_argument("--output-dir",
+                    help="Directory to put finished VCFs in", default=".")
 args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
 REFERENCE = args.reference_fasta
@@ -39,6 +42,7 @@ THREADS = args.threads
 REF_SPECIES = Path(REFERENCE).name.split(".")[0]
 REGION_SIZE = args.region_size
 READS = glob.glob(f"{READS_DIR}/*.fastq.gz")
+OUTPUT_DIR = args.output_dir
 
 Path(TEMP_DIR).mkdir(exist_ok=True)
 
@@ -115,7 +119,7 @@ def generate_bam(infile, outfile, threads, temp_dir):
     #subprocess.run(["samtools", "index", outfile], check=True) # this fails - see if later steps require it
 
 
-@transform(generate_bam, suffix(".bam"), ".MD.bam", 1, "temp", 600_000)
+@transform(generate_bam, suffix(".bam"), ".MD.bam", 1, TEMP_DIR, 600_000)
 def mark_duplicates(input_bam, output_bam, threads, temp_dir, overflow_list_size):
     """Mark duplicates with Sambamba
 
@@ -142,36 +146,7 @@ def mark_duplicates(input_bam, output_bam, threads, temp_dir, overflow_list_size
 ### SUBPIPELINE 3: Call variants
 ################################
 
-def run_freebayes_on_region(bams, reference, region, output_dir):
-    """Run Freebayes on a single region. 
-    Uses a non-Ruffusonic workaround (since no suitable decorator) to write VCFs to a temp dir outside a task.
-
-
-    Args:
-        bams (list): List of paths to BAM files
-        reference (path): Path to reference FASTA
-        region (str): Region in format {chrom}:{start}-{stop}
-        output_dir (path): Directory to put region VCFs in
-    """
-    cmd = ["freebayes", "-f", reference, 
-                    "--limit-coverage", "250",
-                    "--use-best-n-alleles", "8",
-                    "--no-population-priors", "--use-mapping-quality",
-                    "--ploidy", "2", "--haplotype-length", "-1",
-                    "--region", region]
-
-    for bam in bams:
-        cmd.extend(["--bam", bam])
-
-    output_vcf = f"{output_dir}/{region}.vcf"
-
-    subprocess.Popen(cmd, stdout=open(output_vcf, "w"))
-
-    subprocess.run(["bgzip", "--force", output_vcf], check=True)
-    subprocess.run(["bcftools", "index", f"{output_vcf}.gz"], check=True)
-
-
-@merge([mark_duplicates, generate_fasta_regions], f"{REF_SPECIES}.vcf.gz", 
+@merge([mark_duplicates, generate_fasta_regions], f"{OUTPUT_DIR}/{REF_SPECIES}.vcf.gz", 
        REFERENCE, THREADS, TEMP_DIR)
 def call_variants(infiles, outfile, reference, threads, tempdir):
     """Call variants with Freebayes.
@@ -194,7 +169,7 @@ def call_variants(infiles, outfile, reference, threads, tempdir):
     infiles = glob.glob(f"{tempdir}/*.vcf.gz")
     bcftools_concat_cmd = ["bcftools", "concat", "--allow-overlaps", "--remove-duplicates", "--output", outfile]
     bcftools_concat_cmd.extend(infiles)
-    subprocess.run(bcftools_concat_cmd, check=True)
+    subprocess.run(bcftools_concat_cmd, check=True, stdout=open(outfile, "w"))
 
 def main():
 
