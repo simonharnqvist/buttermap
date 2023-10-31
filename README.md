@@ -12,7 +12,8 @@ Mapping and VCF calling pipeline for butterfly genomes from paired-end reads
 
 ### Dependencies
 
-Full list of dependencies are provided in `environment.yaml`. If you need to install dependencies manually (e.g. via homebrew for testing on Mac), please see this table:
+Full list of dependencies are provided in `environment.yaml`. 
+If you need to install dependencies manually (e.g. via homebrew for testing on Mac), please use:
 
 | Software/package | Version |
 | ---------------- | --------------------------- |
@@ -57,6 +58,8 @@ conda activate buttermap
 
 This should install `buttermap` itself, but if that doesn't work (or if you installed dependencies manually), try
 ```pip install .``` in the top level directory.
+
+Note that if you wish to edit the pipeline, you will need to make an editable install with `pip install -e .`.
 
 #### 3. (Optional): Run tests </br>
 ``` shell
