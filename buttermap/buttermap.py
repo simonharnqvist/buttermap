@@ -33,7 +33,7 @@ parser.add_argument("--region-size",
                     help="Region size for parallelising variant calling", type=int, default=100_000, required=False)
 parser.add_argument("--output-dir",
                     help="Directory to put finished VCFs in", default=".")
-args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
+args = parser.parse_args()
 
 REFERENCE = args.reference_fasta
 READS_DIR = args.reads_dir
@@ -71,7 +71,7 @@ def generate_fasta_regions(infile, outfile, size):
 
 @collate(READS, 
          formatter("([^/]+)[12].fastq.gz$"), 
-         "{path[0]}/{1[0]}paf",
+         "{path[0]}/{1[0]}sam",
          REFERENCE, 1)
 def map_reads(infiles, outfile, reference_fasta, threads):
     """Map reads to reference with minimap2
@@ -96,7 +96,7 @@ def map_reads(infiles, outfile, reference_fasta, threads):
 
 
 
-@transform(map_reads, suffix(".paf"), ".bam", 1, TEMP_DIR)
+@transform(map_reads, suffix(".sam"), ".bam", 1, TEMP_DIR)
 def generate_bam(infile, outfile, threads, temp_dir):
     """View & sort PAF file to generate BAM file
 

@@ -11,16 +11,19 @@ Mapping and VCF calling pipeline for butterfly genomes from paired-end reads
 6. Merging chromosome VCFs with bcftools
 
 ### Dependencies
-|Software/package              | Version used in development |
-|----------------------|-----------------------------|
-|Python                | 3.11.5                      |
-|ruffus                | 2.8.4                       |
-|joblib                | 1.2.0                       |
-|minimap2              | 2.26                  |
-|samtools              | 1.17                        |
-|sambamba              | 1.0.1                       |
-|freebayes             | 1.3.6                      |
-|bcftools              | 1.17                        |
+
+Full list of dependencies are provided in `environment.yaml`. If you need to install dependencies manually (e.g. via homebrew for testing on Mac), please see this table:
+
+| Software/package | Version |
+| ---------------- | --------------------------- |
+| Python           | 3.12.0                      |
+| ruffus           | 2.8.4                       |
+| joblib           | 1.3.2                       |
+| minimap2         | 2.26                        |
+| samtools         | 1.18                        |
+| sambamba         | 1.0                       |
+| freebayes        | 1.3.7                       |
+| bcftools         | 1.18                        |
 
 Additionally, pytest is required to run the unit tests, which is an optional installation step.
 
@@ -29,10 +32,10 @@ Additionally, pytest is required to run the unit tests, which is an optional ins
 
 Buttermap requires the following input files, which **must** follow the naming rules below:
 
-|File              | File name                   |
-|------------------|-----------------------------|
-|Reference FASTA   | [REFERENCE_SPECIES].reference.fasta   |
-|Reads             | [SAMPLE_ID].[N].fastq.gz    |
+| File            | File name                           |
+| --------------- | ----------------------------------- |
+| Reference FASTA | [REFERENCE_SPECIES].reference.fasta |
+| Reads           | [SAMPLE_ID].[N].fastq.gz            |
 
 ## User guide
 
@@ -46,7 +49,7 @@ git clone https://github.com/simonharnqvist/buttermap.git
 #### 2. Install using conda:</br> 
 ``` shell
 cd buttermap # important; see below
-conda env create --file buttermap.yaml
+conda env create --file environment.yaml # or use mamba
 conda activate buttermap
 ```
 
@@ -57,7 +60,7 @@ This should install `buttermap` itself, but if that doesn't work (or if you inst
 
 #### 3. (Optional): Run tests </br>
 ``` shell
-pytest tests
+python -m pytest tests
 ```
 This is a good idea to ensure that the installation has worked and that the code wasn't broken to begin with. Please raise an issue on GitHub with the error message if the tests failed. 
 
@@ -73,7 +76,7 @@ cp my_original_input buttermap_copies
 
 Parameters are available by running `buttermap`:
 ``` shell
-(buttermap) computer:dir buttermap
+(buttermap) computer:dir buttermap --help
 ```
 
 ```
