@@ -1,16 +1,13 @@
 #!/usr/bin/env python
 
-from ruffus import transform, suffix, pipeline_run, merge, collate, regex, formatter
+from ruffus import transform, suffix, pipeline_run, merge, collate, regex, formatter, split, follows
 from pathlib import Path
 import subprocess
-from joblib import Parallel, delayed
 import glob
 import shutil
 import argparse
-import sys
-from buttermap.fasta_generate_regions import generate_regions
+from math import ceil
 from buttermap.utils import read_bed
-from buttermap.freebayes_region import run_freebayes_on_region
 
 #############
 ### SETUP ###
@@ -26,25 +23,21 @@ parser.add_argument("--reads-dir",
 parser.add_argument("--temp-dir", 
                     help="Directory for temporary files; automatically deleted after successful run", 
                     default="buttermap_temp")
-parser.add_argument("--threads", 
-                    help="Number of CPU threads to use",
-                    default=1)
 parser.add_argument("--region-size",
                     help="Region size for parallelising variant calling", type=int, default=100_000, required=False)
+parser.add_argument("--threads", help="Number of threads", default=1)
 parser.add_argument("--output-dir",
-                    help="Directory to put finished VCFs in", default=".")
+                    help="Output directory", default=".")
 args = parser.parse_args()
 
 REFERENCE = args.reference_fasta
-READS_DIR = args.reads_dir
-TEMP_DIR = args.temp_dir
-THREADS = args.threads
+READS_DIR = Path(args.reads_dir)
+TEMP_DIR = Path(args.temp_dir)
 REF_SPECIES = Path(REFERENCE).name.split(".")[0]
 REGION_SIZE = args.region_size
 READS = glob.glob(f"{READS_DIR}/*.fastq.gz")
+THREADS = args.threads
 OUTPUT_DIR = args.output_dir
-
-Path(TEMP_DIR).mkdir(exist_ok=True)
 
 
 
@@ -58,11 +51,33 @@ def index_fasta(infile, outfile):
     subprocess.run(["samtools", "faidx", infile, "--fai-idx", outfile], check=True)
 
 
-@transform(index_fasta, suffix("fasta.fai"), "regions.bed", REGION_SIZE)
-def generate_fasta_regions(infile, outfile, size):
-    """Generate BED file of regions for parallelisation of downstream steps"""
-    generate_regions(fasta_index_file=infile,
-                     size=size, output_bed=outfile)
+@split(index_fasta, f"{TEMP_DIR}/*.bed", REGION_SIZE)
+def generate_fasta_regions(infile, outfiles, region_size):
+    """Generate BED file per region for parallelisation of downstream steps. 
+    Modified from https://github.com/freebayes/freebayes/blob/master/scripts/fasta_generate_regions.py"""
+
+
+    with open(infile, "r") as fasta_index:
+        for line in fasta_index:
+            fields = line.strip().split("\t")
+            chrom_name = fields[0]
+            chrom_length = int(fields[1])
+
+            region_start = 0
+            while region_start < chrom_length:
+                region_end = region_start + region_size
+                if region_end > chrom_length:
+                    region_end = chrom_length
+                start = str(region_start)
+                end = str(region_end)
+                
+                region = str(ceil(region_end / region_size))
+                file_path = f"{TEMP_DIR}/{chrom_name}.{region}.bed"
+                
+                with open(file_path, "w") as f:
+                    f.write("\t".join([chrom_name, start, end]))
+
+                region_start = region_end
 
 
 ########################################
@@ -71,8 +86,9 @@ def generate_fasta_regions(infile, outfile, size):
 
 @collate(READS, 
          formatter("([^/]+)[12].fastq.gz$"), 
-         "{path[0]}/{1[0]}sam",
-         REFERENCE, 1)
+         OUTPUT_DIR + "/{1[0]}sam",
+         #"{path[0]}/{1[0]}sam",
+         REFERENCE, THREADS)
 def map_reads(infiles, outfile, reference_fasta, threads):
     """Map reads to reference with minimap2
 
@@ -95,8 +111,7 @@ def map_reads(infiles, outfile, reference_fasta, threads):
     subprocess.run(minimap_cmd, check=True, stdout=outbuff)
 
 
-
-@transform(map_reads, suffix(".sam"), ".bam", 1, TEMP_DIR)
+@transform(map_reads, suffix(".sam"), ".bam", THREADS, TEMP_DIR)
 def generate_bam(infile, outfile, threads, temp_dir):
     """View & sort PAF file to generate BAM file
 
@@ -115,12 +130,16 @@ def generate_bam(infile, outfile, threads, temp_dir):
                     "-T", f"{temp_dir}/temp.bam"], 
                     stdin=view.stdout, 
                     stdout=open(outfile, "w"))
-    
-    #subprocess.run(["samtools", "index", outfile], check=True) # this fails - see if later steps require it
 
 
-@transform(generate_bam, suffix(".bam"), ".MD.bam", 1, TEMP_DIR, 600_000)
-def mark_duplicates(input_bam, output_bam, threads, temp_dir, overflow_list_size):
+@transform(generate_bam, suffix(".bam"), ".bam.bai")
+def index_bam(infile, outfile):
+    subprocess.run(["samtools", "index", infile], check=True)
+
+
+@follows(index_bam)
+@transform(generate_bam, suffix(".bam"), ".MD.bam", TEMP_DIR, 600_000, THREADS)
+def mark_duplicates(input_bam, output_bam, temp_dir, overflow_list_size, threads):
     """Mark duplicates with Sambamba
 
     Args:
@@ -146,35 +165,55 @@ def mark_duplicates(input_bam, output_bam, threads, temp_dir, overflow_list_size
 ### SUBPIPELINE 3: Call variants
 ################################
 
-@merge([mark_duplicates, generate_fasta_regions], f"{OUTPUT_DIR}/{REF_SPECIES}.vcf.gz", 
-       REFERENCE, THREADS, TEMP_DIR)
-def call_variants(infiles, outfile, reference, threads, tempdir):
-    """Call variants with Freebayes.
+#@follows(mark_duplicates)
+@transform([generate_fasta_regions, mark_duplicates], suffix(".bed"), ".vcf")
+def call_variants_on_region(infile, outfile):
+    """Call variants on each region (i.e. from each BED)"""
 
-    Args:
-        infiles (list): Outputs of mark_duplicates and generate_fasta_region tasks
-        outfile (_type_): Output VCF path}
-        reference (_type_): Reference FASTA
-        threads (_type_): Number of threads for parallel processing
-        tempdir (_type_): Temporary directory to write VCFs to
-    """
+    region = read_bed(infile)[0]
+    bams = glob.glob(f"{OUTPUT_DIR}/*.MD.bam")
 
-    Path(tempdir).mkdir(exist_ok=True)
+    cmd = ["freebayes", "-f", REFERENCE, 
+                "--limit-coverage", "250",
+                "--use-best-n-alleles", "8",
+                "--no-population-priors", "--use-mapping-quality",
+                "--ploidy", "2", "--haplotype-length", "-1",
+                "--region", region,
+                "--vcf", outfile]
 
-    bams = infiles[:-1]
-    regions = read_bed(infiles[-1])
+    assert len(bams) >= 1, f"No BAMs found in {bams}"
+    for bam in bams:
+        cmd.extend(["--bam", bam])
 
-    Parallel(n_jobs=threads)(delayed(run_freebayes_on_region)(bams, reference, region, tempdir) for region in regions[0:5])
+    subprocess.run(cmd, check=True)
 
-    infiles = glob.glob(f"{tempdir}/*.vcf.gz")
+
+@transform(call_variants_on_region, suffix(".vcf"), ".vcf.gz")
+def compress_vcf(infile, outfile):
+    subprocess.Popen(["bgzip", "--force", infile])
+
+@transform(compress_vcf, suffix(".vcf.gz"), ".vcf.gz.csi")
+def index_vcf(infile, outfile):
+    subprocess.Popen(["bcftools", "index", infile])
+
+@follows(index_vcf)
+@merge(compress_vcf, f"{OUTPUT_DIR}/{REF_SPECIES}.vcf.gz")
+def merge_variant_calls(infiles, outfile):
+    """Merge all region VCFs to single output"""
+
     bcftools_concat_cmd = ["bcftools", "concat", "--allow-overlaps", "--remove-duplicates", "--output", outfile]
     bcftools_concat_cmd.extend(infiles)
     subprocess.run(bcftools_concat_cmd, check=True, stdout=open(outfile, "w"))
 
-def main():
 
-    Path(TEMP_DIR).mkdir(exist_ok=True)
-    pipeline_run()
+##########
+### MAIN 
+##########
+
+def main():
+    Path(TEMP_DIR).mkdir()
+
+    pipeline_run(multithread=THREADS)
     shutil.rmtree(TEMP_DIR)
 
 if __name__ == "__main__":

@@ -16,15 +16,15 @@ Full list of dependencies are provided in `environment.yaml`.
 If you need to install dependencies manually (e.g. via homebrew for testing on Mac), please use:
 
 | Software/package | Version |
-| ---------------- | --------------------------- |
-| Python           | 3.12.0                      |
-| ruffus           | 2.8.4                       |
-| joblib           | 1.3.2                       |
-| minimap2         | 2.26                        |
-| samtools         | 1.18                        |
-| sambamba         | 1.0                       |
-| freebayes        | 1.3.7                       |
-| bcftools         | 1.18                        |
+| ---------------- | ------- |
+| Python           | 3.12.0  |
+| ruffus           | 2.8.4   |
+| joblib           | 1.3.2   |
+| minimap2         | 2.26    |
+| samtools         | 1.18    |
+| sambamba         | 1.0     |
+| freebayes        | 1.3.7   |
+| bcftools         | 1.18    |
 
 Additionally, pytest is required to run the unit tests, which is an optional installation step.
 
@@ -47,11 +47,12 @@ Buttermap requires the following input files, which **must** follow the naming r
 git clone https://github.com/simonharnqvist/buttermap.git
 ```
 
-#### 2. Install using conda:</br> 
+#### 2. Install using mamba/conda:</br> 
+(`mamba` is recommended, but `conda` may work)
 ``` shell
 cd buttermap # important; see below
-conda env create --file environment.yaml # or use mamba
-conda activate buttermap
+mamba env create --file environment.yaml
+mamba activate buttermap
 ```
 
 **Important**: You must run this command from within the repo directory as it relies on a relative path to the `buttermap` wheel.
