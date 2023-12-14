@@ -11,5 +11,6 @@ dependencies:
   - ruffus=2.8.4
   - sambamba=1.0
   - samtools=1.18
+  - bwa=0.7
   - pip:
     - dist/buttermap-0.0.1-py3-none-any.whl

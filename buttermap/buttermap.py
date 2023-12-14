@@ -102,7 +102,7 @@ def map_reads(infiles, outfile, reference_fasta, threads):
     assert sample_id == Path(infiles[1]).stem.split(".")[0]
 
     bwa_cmd = ["bwa", "mem", "-t", str(threads), 
-               "-R" f'@RG\\tID:{sample_id}\\tSM:{sample_id}']
+               "-R", f'@RG\\tID:{sample_id}\\tSM:{sample_id}']
     
     bwa_cmd.append(reference_fasta)
     bwa_cmd.extend(list(infiles))
@@ -113,10 +113,10 @@ def map_reads(infiles, outfile, reference_fasta, threads):
 
 @transform(map_reads, suffix(".sam"), ".bam", THREADS, TEMP_DIR)
 def generate_bam(infile, outfile, threads, temp_dir):
-    """View & sort PAF file to generate BAM file
+    """View & sort SAM file to generate BAM file
 
     Args:
-        input_paf (path): Input PAF path
+        in (path): Input PAF path
         output_bam (path): Output BAM path
         threads (int): Number of threads to use
         temp_bam (path): Temporary BAM file to write to during processing
