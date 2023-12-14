@@ -101,11 +101,11 @@ def map_reads(infiles, outfile, reference_fasta, threads):
     sample_id = Path(infiles[0]).stem.split(".")[0]
     assert sample_id == Path(infiles[1]).stem.split(".")[0]
 
-    bwa_cmd = ["bwa", "mem", "-t", str(threads), 
-               "-R", f'@RG\\tID:{sample_id}\\tSM:{sample_id}']
-    
+    bwa_cmd = ["bwa", "mem", "-t", str(threads), "-R", f"@RG\\tID:{sample_id}\\tSM:{sample_id}"]
     bwa_cmd.append(reference_fasta)
     bwa_cmd.extend(list(infiles))
+
+    print(bwa_cmd)
 
     outbuff = open(outfile, "w")
     subprocess.run(bwa_cmd, check=True, stdout=outbuff)
