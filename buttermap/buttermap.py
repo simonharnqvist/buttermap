@@ -90,7 +90,7 @@ def generate_fasta_regions(infile, outfiles, region_size):
          #"{path[0]}/{1[0]}sam",
          REFERENCE, THREADS)
 def map_reads(infiles, outfile, reference_fasta, threads):
-    """Map reads to reference with minimap2
+    """Map reads to reference with bwa-mem
 
     Args:
         infiles (list): List of input files [reference, (sample1_reads1, sample1_reads2)...]
@@ -101,14 +101,14 @@ def map_reads(infiles, outfile, reference_fasta, threads):
     sample_id = Path(infiles[0]).stem.split(".")[0]
     assert sample_id == Path(infiles[1]).stem.split(".")[0]
 
-    minimap_cmd = ["minimap2",
-                   "-ax", "sr", "-t", str(threads), 
-                   "-R", f'@RG\\tID:{sample_id}\\tSM:{sample_id}']
-    minimap_cmd.append(reference_fasta)
-    minimap_cmd.extend(list(infiles))
+    bwa_cmd = ["bwa", "mem", "-t", str(threads), 
+               "-R" f'@RG\\tID:{sample_id}\\tSM:{sample_id}']
+    
+    bwa_cmd.append(reference_fasta)
+    bwa_cmd.extend(list(infiles))
 
     outbuff = open(outfile, "w")
-    subprocess.run(minimap_cmd, check=True, stdout=outbuff)
+    subprocess.run(bwa_cmd, check=True, stdout=outbuff)
 
 
 @transform(map_reads, suffix(".sam"), ".bam", THREADS, TEMP_DIR)
