@@ -46,12 +46,12 @@ OUTPUT_DIR = args.output_dir
 #####################################################
 
 @transform(REFERENCE, suffix(".fasta"), ".fasta.fai")
-def index_fasta(infile, outfile):
-    """Index FASTA file"""
+def index_fasta_samtools(infile, outfile):
+    """Index FASTA file with samtools"""
     subprocess.run(["samtools", "faidx", infile, "--fai-idx", outfile], check=True)
 
 
-@split(index_fasta, f"{TEMP_DIR}/*.bed", REGION_SIZE)
+@split(index_fasta_samtools, f"{TEMP_DIR}/*.bed", REGION_SIZE)
 def generate_fasta_regions(infile, outfiles, region_size):
     """Generate BED file per region for parallelisation of downstream steps. 
     Modified from https://github.com/freebayes/freebayes/blob/master/scripts/fasta_generate_regions.py"""
@@ -84,17 +84,22 @@ def generate_fasta_regions(infile, outfiles, region_size):
 ### SUBPIPELINE 2: Map reads per sample
 ########################################
 
+@split(REFERENCE, "*")
+def index_fasta_bwa(infile, outfile):
+    """Index FASTA file with BWA"""
+    subprocess.run(["bwa", "index", infile], check=True)
+
+@follows(index_fasta_bwa)
 @collate(READS, 
          formatter("([^/]+)[12].fastq.gz$"), 
          OUTPUT_DIR + "/{1[0]}sam",
-         #"{path[0]}/{1[0]}sam",
          REFERENCE, THREADS)
 def map_reads(infiles, outfile, reference_fasta, threads):
     """Map reads to reference with bwa-mem
 
     Args:
         infiles (list): List of input files [reference, (sample1_reads1, sample1_reads2)...]
-        outfile (path): PAF file path
+        outfile (path): SAM file path
         threads (int, optional): Number of threads to run minimap with. Defaults to 1.
     """
 
@@ -134,7 +139,7 @@ def generate_bam(infile, outfile, threads, temp_dir):
 
 @transform(generate_bam, suffix(".bam"), ".bam.bai")
 def index_bam(infile, outfile):
-    subprocess.run(["samtools", "index", infile], check=True)
+    subprocess.Popen(["samtools", "index", infile])
 
 
 @follows(index_bam)
