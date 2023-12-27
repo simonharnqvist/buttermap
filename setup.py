@@ -6,7 +6,7 @@ setup(
     install_requires=["ruffus"],
     entry_points={
         'console_scripts': [
-            'buttermap=buttermap.buttermap:main'
+            'buttermap=buttermap.buttermap:etode'
         ]
     }
 )
