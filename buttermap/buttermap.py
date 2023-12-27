@@ -25,7 +25,7 @@ parser.add_argument("--temp-dir",
                     default="buttermap_temp")
 parser.add_argument("--region-size",
                     help="Region size for parallelising variant calling", type=int, default=100_000, required=False)
-parser.add_argument("--threads", help="Number of threads", default=1)
+parser.add_argument("--threads", help="Number of threads", type=int, default=1)
 parser.add_argument("--output-dir",
                     help="Output directory", default=".")
 args = parser.parse_args()
