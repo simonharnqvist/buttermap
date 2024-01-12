@@ -205,11 +205,21 @@ def index_vcf(infile, outfile):
 @merge(compress_vcf, f"{OUTPUT_DIR}/{REF_SPECIES}.vcf.gz")
 def merge_variant_calls(infiles, outfile):
     """Merge all region VCFs to single output"""
-
+    # Create sublists of 500 files
+    n = 500
+    x = [infiles[i:i + n] for i in range(0, len(infiles), n)]
+    sublists_list = []
+    # Merge VCFs in blocks of 500, then merge these intermediate ones in a single one
+    for i in range(0, len(x)):
+        bcftools_concat_cmd = ["bcftools", "concat", "--allow-overlaps", "--remove-duplicates", "--output", f"sublist_{i}.vcf"]
+        bcftools_concat_cmd.extend(x[i])
+        subprocess.run(bcftools_concat_cmd, check=True, stdout=open(f"sublist_{i}.vcf", "w"))
+        subprocess.Popen(["bgzip", "--force", f"sublist_{i}.vcf"])
+        subprocess.Popen(["bcftools", "index", f"sublist_{i}.vcf.gz"])
+        sublists_list.append(f"sublist_{i}.vcf.gz")
     bcftools_concat_cmd = ["bcftools", "concat", "--allow-overlaps", "--remove-duplicates", "--output", outfile]
-    bcftools_concat_cmd.extend(infiles)
+    bcftools_concat_cmd.extend(sublists_list)
     subprocess.run(bcftools_concat_cmd, check=True, stdout=open(outfile, "w"))
-
 
 ##########
 ### MAIN 
