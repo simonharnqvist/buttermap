@@ -62,14 +62,6 @@ This should install `buttermap` itself, but if that doesn't work (or if you inst
 
 Note that if you wish to edit the pipeline, you will need to make an editable install with `pip install -e .`.
 
-#### 3. (Optional): Run tests </br>
-``` shell
-python -m pytest tests
-```
-This is a good idea to ensure that the installation has worked and that the code wasn't broken to begin with. Please raise an issue on GitHub with the error message if the tests failed. 
-
-Note that the tests are minimal and essentially just check that the pipeline doesn't throw any errors on a (tiny) test dataset, and that a correctly formatted VCF is produced. You should not assume that this means that the pipeline is bug-free.
-
 
 ### Running `buttermap`
 You should now be able to run `buttermap` from the command line. Before doing so, I would recommend creating a new directory, containing a subdirectory with **copies of** the input files. Some tasks in `buttermap` will change files in-place, and although the original input files *should* be untouched, there are no guarantees.
