@@ -7,7 +7,9 @@ import glob
 import shutil
 import argparse
 from math import ceil
-from buttermap.utils import read_bed
+import warnings
+import threading
+#from buttermap.utils import read_bed
 
 #############
 ### SETUP ###
@@ -35,9 +37,19 @@ READS_DIR = Path(args.reads_dir)
 TEMP_DIR = Path(args.temp_dir)
 REF_SPECIES = Path(REFERENCE).name.split(".")[0]
 REGION_SIZE = args.region_size
-READS = glob.glob(f"{READS_DIR}/*.fastq.gz")
-THREADS = args.threads
+READS = glob.glob(f"{READS_DIR}/*.fq.gz")
+
+if int(args.threads) > 0:
+    THREADS = int(args.threads)
+elif int(args.threads) == -1:
+    THREADS = threading.active_count()
+else:
+    warnings.warn("f{args.threads} not a valid number of threads - running with 1 thread")
+    THREADS = 1
+
 OUTPUT_DIR = args.output_dir
+
+print(f"Reads:{READS}")
 
 
 
@@ -49,7 +61,6 @@ OUTPUT_DIR = args.output_dir
 def index_fasta_samtools(infile, outfile):
     """Index FASTA file with samtools"""
     subprocess.run(["samtools", "faidx", infile, "--fai-idx", outfile], check=True)
-
 
 @split(index_fasta_samtools, f"{TEMP_DIR}/*.bed", REGION_SIZE)
 def generate_fasta_regions(infile, outfiles, region_size):
@@ -89,11 +100,12 @@ def index_fasta_bwa(infile, outfile):
     """Index FASTA file with BWA"""
     subprocess.run(["bwa", "index", infile], check=True)
 
+
 @follows(index_fasta_bwa)
 @collate(READS, 
-         formatter("([^/]+)[12].fastq.gz$"), 
-         OUTPUT_DIR + "/{1[0]}sam",
-         REFERENCE, THREADS)
+        regex(r"(.+)/(.+)\.[1|2]\.trim.fq.gz"),
+        str(TEMP_DIR) + "/" + r"\2.sam",
+        REFERENCE, THREADS)
 def map_reads(infiles, outfile, reference_fasta, threads):
     """Map reads to reference with bwa-mem
 
@@ -103,6 +115,8 @@ def map_reads(infiles, outfile, reference_fasta, threads):
         threads (int, optional): Number of threads to run minimap with. Defaults to 1.
     """
 
+    print(f"Infiles: {infiles}")
+
     sample_id = Path(infiles[0]).stem.split(".")[0]
     assert sample_id == Path(infiles[1]).stem.split(".")[0]
 
@@ -111,10 +125,9 @@ def map_reads(infiles, outfile, reference_fasta, threads):
     bwa_cmd.extend(list(infiles))
 
     print(bwa_cmd)
-
+    print(f"outfile: {outfile}")
     outbuff = open(outfile, "w")
     subprocess.run(bwa_cmd, check=True, stdout=outbuff)
-
 
 @transform(map_reads, suffix(".sam"), ".bam", THREADS, TEMP_DIR)
 def generate_bam(infile, outfile, threads, temp_dir):
@@ -136,11 +149,9 @@ def generate_bam(infile, outfile, threads, temp_dir):
                     stdin=view.stdout, 
                     stdout=open(outfile, "w"))
 
-
 @transform(generate_bam, suffix(".bam"), ".bam.bai")
 def index_bam(infile, outfile):
     subprocess.Popen(["samtools", "index", infile])
-
 
 @follows(index_bam)
 @transform(generate_bam, suffix(".bam"), ".MD.bam", TEMP_DIR, 600_000, THREADS)
@@ -159,16 +170,39 @@ def mark_duplicates(input_bam, output_bam, temp_dir, overflow_list_size, threads
             "sambamba", "markdup", 
             "--overflow-list-size", f"{overflow_list_size}",
             "-t", f"{threads}",
-            "--tmpdir", temp_dir,
+            "--tmpdir", str(temp_dir),
             input_bam, output_bam
         ],
         check=True
     )
 
-
 ################################
 ### SUBPIPELINE 3: Call variants
 ################################
+
+def read_bed(file):
+    with open(file, "r") as f:
+        lines = f.readlines()
+
+    regions = []
+    for line in lines:
+        chrom, start, end = line.split("\t")
+        end = end.strip("\n")
+        regions.append(f"{chrom}:{start}-{end}")
+
+    return regions
+
+def read_bed(file):
+    with open(file, "r") as f:
+        lines = f.readlines()
+
+    regions = []
+    for line in lines:
+        chrom, start, end = line.split("\t")
+        end = end.strip("\n")
+        regions.append(f"{chrom}:{start}-{end}")
+
+    return regions
 
 #@follows(mark_duplicates)
 @transform([generate_fasta_regions, mark_duplicates], suffix(".bed"), ".vcf")
@@ -176,7 +210,7 @@ def call_variants_on_region(infile, outfile):
     """Call variants on each region (i.e. from each BED)"""
 
     region = read_bed(infile)[0]
-    bams = glob.glob(f"{OUTPUT_DIR}/*.MD.bam")
+    bams = glob.glob(f"{TEMP_DIR}/*.MD.bam")
 
     cmd = ["freebayes", "-f", REFERENCE, 
                 "--limit-coverage", "250",
@@ -192,7 +226,6 @@ def call_variants_on_region(infile, outfile):
 
     subprocess.run(cmd, check=True)
 
-
 @transform(call_variants_on_region, suffix(".vcf"), ".vcf.gz")
 def compress_vcf(infile, outfile):
     subprocess.Popen(["bgzip", "--force", infile])
@@ -203,12 +236,24 @@ def index_vcf(infile, outfile):
 
 @follows(index_vcf)
 @merge(compress_vcf, f"{OUTPUT_DIR}/{REF_SPECIES}.vcf.gz")
-def merge_variant_calls(infiles, outfile):
-    """Merge all region VCFs to single output"""
+def concat_variant_calls(infiles, outfile):
+    """Concat all region VCFs to single output, grouping in sets of 200 to avoid 'too many files' error"""
 
-    bcftools_concat_cmd = ["bcftools", "concat", "--allow-overlaps", "--remove-duplicates", "--output", outfile]
-    bcftools_concat_cmd.extend(infiles)
-    subprocess.run(bcftools_concat_cmd, check=True, stdout=open(outfile, "w"))
+    subprocess.run(["split", "-l", "200", infiles, f"subset_vcfs"], check=True)
+    subprocess.run(["mv", "subset_vcfs*", TEMP_DIR], check=True)
+    vcf_subsets = glob.glob(f"{TEMP_DIR}/subset_vcfs*")
+
+    for subset_list in vcf_subsets:
+        bcftools_concat_cmd = ["bcftools", "concat", "--allow-overlaps", 
+        "--remove-duplicates", "--file-list", subset_list]
+        subprocess.run(bcftools_concat_cmd, check=True, stdout=open(f"{subset_list}.vcf.gz", "w"))
+
+    
+    bcftools_concat_cmd = ["bcftools", "concat", "--allow-overlaps", 
+        "--remove-duplicates", "--output", outfile]
+    bcftools_concat_cmd.extend([f"{subset_list}.vcf.gz" for subset_list in vcf_subsets])
+    subprocess.run(bcftools_concat_cmd, check=True)
+
 
 
 ##########
@@ -216,10 +261,10 @@ def merge_variant_calls(infiles, outfile):
 ##########
 
 def main():
-    Path(TEMP_DIR).mkdir()
+    Path(TEMP_DIR).mkdir(exist_ok=True)
 
     pipeline_run(multithread=THREADS)
-    shutil.rmtree(TEMP_DIR)
+    #shutil.rmtree(TEMP_DIR)
 
 if __name__ == "__main__":
     main()
